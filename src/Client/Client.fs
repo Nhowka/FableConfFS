@@ -5,101 +5,67 @@ open Elmish.React
 open Elmish.Bridge
 open Fable.React
 open Fable.React.Props
-open Fetch.Types
-open Thoth.Fetch
 open Fulma
-open Thoth.Json
-
 open Shared
+open Fable.FontAwesome
 
-// The model holds data that you want to keep track of while the application is running
-// in this case, we are keeping track of a counter
-// we mark it as optional, because initially it will not be available from the client
-// the initial value will be requested from server
-type Model = { Counter: Counter option }
+type Model =
+    { Contents: FileItem list option }
 
-// The Msg type defines what events/actions can occur while the application is running
-// the state of the application changes *only* in reaction to these events
-type Msg =
-    | Increment
-    | Decrement
-    | Remote of ClientMsg
+type Msg = Remote of ClientMsg
 
+let init(): Model * Cmd<Msg> = { Contents = None }, Cmd.none
 
-// defines the initial state and initial command (= side-effect) of the application
-let init () : Model * Cmd<Msg> =
-    { Counter = None }, Cmd.none
+let update (msg: Msg) (currentModel: Model): Model * Cmd<Msg> =
+    match currentModel.Contents, msg with
+    | _, Remote(LoadRoot root) -> { currentModel with Contents = Some root }, Cmd.none
 
-// The update function computes the next state of the application based on the current state and the incoming events/messages
-// It can also run side-effects (encoded as commands) like calling the server via Http.
-// these commands in turn, can dispatch messages to which the update function will react.
-let update (msg : Msg) (currentModel : Model) : Model * Cmd<Msg> =
-    match currentModel.Counter, msg with
-    | Some counter, Increment ->
-        let nextCounter = { counter with Value = counter.Value + 1 }
-        currentModel, Cmd.bridgeSendOr ServerMsg.Increment (Remote(SyncCounter nextCounter))
-    | Some counter, Decrement ->
-        let nextCounter = { counter with Value = counter.Value - 1 }
-        currentModel, Cmd.bridgeSendOr ServerMsg.Decrement (Remote(SyncCounter nextCounter))
-    | _, Remote(SyncCounter counter) ->
-        { currentModel with Counter = Some counter}, Cmd.none
-    | _ -> currentModel, Cmd.none
+let sizeFormatter =
+    let sizes = [ "KB"; "MB"; "GB" ]
+    fun n ->
+        if n > 1024 then
+            let rec formatter sizes n =
+                match sizes with
+                | current :: remaining ->
+                    if n > 1024. then formatter remaining (n / 1024.)
+                    else sprintf "%0.2f%s" n current
+                | [] -> "Big"
+            formatter sizes ((float n) / 1024.)
+        else sprintf "%iB" n
 
+let rec makeTree (baseFolder: string) dispatch =
+    function
+    | File f ->
+        Field.div
+            [ Field.HasAddons
+              Field.Props [ Style [ Background "#f5f5ff" ] ] ]
+            [ Control.p [] [ Icon.icon [] [ Fa.i [ Fa.Solid.File ] [] ] ]
 
+              Control.p [ Control.IsExpanded ] [ span [] [ str f.FullPath.[baseFolder.Length + 1..] ] ]
+              Control.p [] [ str (sizeFormatter f.Size) ] ]
+    | Directory d ->
+        Field.div []
+            [ Control.div []
+                  [ span []
+                        [ Control.p []
+                              [ Icon.icon [] [ Fa.i [ Fa.Solid.FolderOpen ] [] ]
+                                str d.FullPath.[baseFolder.Length + 1..] ] ] ]
 
-let safeComponents =
-    let components =
-        span [ ]
-           [ a [ Href "https://github.com/SAFE-Stack/SAFE-template" ]
-               [ str "SAFE  "
-                 str Version.template ]
-             str ", "
-             a [ Href "https://saturnframework.github.io" ] [ str "Saturn" ]
-             str ", "
-             a [ Href "http://fable.io" ] [ str "Fable" ]
-             str ", "
-             a [ Href "https://elmish.github.io" ] [ str "Elmish" ]
-             str ", "
-             a [ Href "https://fulma.github.io/Fulma" ] [ str "Fulma" ]
-             str ", "
-             a [ Href "https://github.com/Nhowka/Elmish.Bridge" ] [ str "Elmish.Bridge" ]
+              Control.div [ Control.IsExpanded ]
+                  [ Field.div [ Field.HasAddons ]
+                        [ Control.p [ Control.Props [ Style [ Width "15px" ] ] ] []
 
-           ]
+                          Control.div [ Control.IsExpanded ] (d.Children |> List.map (makeTree d.FullPath dispatch)) ] ] ]
 
-    span [ ]
-        [ str "Version "
-          strong [ ] [ str Version.app ]
-          str " powered by: "
-          components ]
-
-let show = function
-    | { Counter = Some counter } -> string counter.Value
-    | { Counter = None   } -> "Loading..."
-
-let button txt onClick =
-    Button.button
-        [ Button.IsFullWidth
-          Button.Color IsPrimary
-          Button.OnClick onClick ]
-        [ str txt ]
-
-let view (model : Model) (dispatch : Msg -> unit) =
+let view (model: Model) (dispatch: Msg -> unit) =
     div []
         [ Navbar.navbar [ Navbar.Color IsPrimary ]
-            [ Navbar.Item.div [ ]
-                [ Heading.h2 [ ]
-                    [ str "SAFE Template" ] ] ]
+              [ Navbar.Item.div [] [ Heading.h2 [] [ str "FableConf File Sharing" ] ] ]
 
           Container.container []
-              [ Content.content [ Content.Modifiers [ Modifier.TextAlignment (Screen.All, TextAlignment.Centered) ] ]
-                    [ Heading.h3 [] [ str ("Press buttons to manipulate counter: " + show model) ] ]
-                Columns.columns []
-                    [ Column.column [] [ button "-" (fun _ -> dispatch Decrement) ]
-                      Column.column [] [ button "+" (fun _ -> dispatch Increment) ] ] ]
-
-          Footer.footer [ ]
-                [ Content.content [ Content.Modifiers [ Modifier.TextAlignment (Screen.All, TextAlignment.Centered) ] ]
-                    [ safeComponents ] ] ]
+              (match model.Contents with
+               | None -> [ str "Shared folder is being loaded" ]
+               | Some content -> content |> List.map (makeTree "" dispatch)) ]
 
 #if DEBUG
 open Elmish.Debug

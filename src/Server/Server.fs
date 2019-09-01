@@ -11,47 +11,72 @@ open Shared
 open Elmish
 open Elmish.Bridge
 
-let tryGetEnv = System.Environment.GetEnvironmentVariable >> function null | "" -> None | x -> Some x
+let tryGetEnv =
+    System.Environment.GetEnvironmentVariable
+    >> function
+    | null
+    | "" -> None
+    | x -> Some x
 
 let publicPath = Path.GetFullPath "../Client/public"
 
 let port =
     "PORT"
-    |> tryGetEnv |> Option.map uint16 |> Option.defaultValue 8085us
+    |> tryGetEnv
+    |> Option.map uint16
+    |> Option.defaultValue 8085us
 
-/// Elmish init function with a channel for sending client messages
-/// Returns a new state and commands
-let init clientDispatch () =
-    let value = { Value = 42 }
-    clientDispatch (SyncCounter value)
-    value, Cmd.none
+type Msg = Remote of ServerMsg
 
-/// Elmish update function with a channel for sending client messages
-/// Returns a new state and commands
+type Model =
+    { BaseFolder: DirectoryInfo }
+
+let removeBase (baseFolder: string) (fullName: string) =
+    if fullName.StartsWith baseFolder then fullName.[baseFolder.Length..]
+    else fullName
+
+let rec readFolder baseFolder folder =
+    let di = DirectoryInfo folder
+    let files =
+        di.GetFiles() |> Array.map (fun e -> File
+                                                 {| FullPath = e.FullName |> removeBase baseFolder
+                                                    Size = int e.Length |})
+    let dirs =
+        di.GetDirectories() |> Array.map (fun d -> Directory
+                                                       {| FullPath = d.FullName |> removeBase baseFolder
+                                                          Children = readFolder baseFolder d.FullName |})
+    Array.append files dirs
+    |> Array.sortBy (function
+        | File f -> f.FullPath
+        | Directory d -> d.FullPath)
+    |> Array.toList
+
+let init clientDispatch baseFolder =
+    let di = DirectoryInfo baseFolder
+    if not di.Exists then di.Create()
+    let contents = readFolder di.FullName di.FullName
+    clientDispatch (LoadRoot contents)
+    { BaseFolder = di }, Cmd.none
+
 let update clientDispatch msg model =
     match msg with
-    | Increment ->
-        let newModel = { model with Value = model.Value + 1 }
-        clientDispatch (SyncCounter newModel)
-        newModel, Cmd.none
-    | Decrement ->
-        let newModel = { model with Value = model.Value - 1 }
-        clientDispatch (SyncCounter newModel)
-        newModel, Cmd.none
+    | Remote() -> failwith "Still not needed"
 
-/// Connect the Elmish functions to an endpoint for websocket connections
+
 let webApp =
-    Bridge.mkServer "/socket/init" init update
-    |> Bridge.run Giraffe.server
+    let baseFolder =
+        Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.UserProfile), "Shared")
+
+    Bridge.mkServer "/socket/init" init update |> Bridge.runWith Giraffe.server baseFolder
 
 let app = application {
-    url ("http://0.0.0.0:" + port.ToString() + "/")
-    use_router webApp
-    memory_cache
-    use_static publicPath
-    use_json_serializer(Thoth.Json.Giraffe.ThothSerializer())
-    app_config Giraffe.useWebSockets
-    use_gzip
-}
+        url ("http://0.0.0.0:" + port.ToString() + "/")
+        use_router webApp
+        memory_cache
+        use_static publicPath
+        use_json_serializer(Thoth.Json.Giraffe.ThothSerializer())
+        app_config Giraffe.useWebSockets
+        use_gzip
+    }
 
 run app
