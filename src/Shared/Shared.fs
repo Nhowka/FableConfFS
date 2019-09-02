@@ -6,4 +6,11 @@ type FileItem =
 
 type ServerMsg = unit
 
-type ClientMsg = LoadRoot of FileItem list
+type ClientMsg =
+    | LoadRoot of FileItem list
+    | FileRenamed of {| OldName: string; NewName: string |}
+    | FileChanged of {| FullPath: string; Size: int |}
+    | FileCreated of {| FullPath: string; Size: int |}
+    | FolderCreated of string
+    | FileDeleted of string
+
