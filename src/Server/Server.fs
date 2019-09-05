@@ -41,13 +41,11 @@ let serverHub = ServerHub()
 let watcher root =
     let watcher = new FileSystemWatcher()
     watcher.Path <- root
-    watcher.Filter <- "**"
+    watcher.Filter <- "*"
     watcher.NotifyFilter <-
         NotifyFilters.Size
         ||| NotifyFilters.FileName
         ||| NotifyFilters.DirectoryName
-        ||| NotifyFilters.LastWrite
-        ||| NotifyFilters.LastAccess
     watcher.IncludeSubdirectories <- true
     let changes _ e = serverHub.BroadcastServer(ChangedEvent e)
     let renamed _ e = serverHub.BroadcastServer(RenamedEvent e)
@@ -92,7 +90,6 @@ let update clientDispatch msg model =
         model, Cmd.none
     | ChangedEvent fc ->
         let removeBase' = removeBase model.BaseFolder.FullName
-        eprintfn "FullPath: %s\nChangeType: %A" fc.FullPath fc.ChangeType
         match fc.ChangeType with
         | WatcherChangeTypes.Created ->
             let file = FileInfo(fc.FullPath)

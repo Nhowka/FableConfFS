@@ -165,3 +165,259 @@ The function `sizeFormatter` only makes the file size prettier, `makeTree` creat
 ![makeTree result](./Images/SimpleTree.png)
 
 Add some new files to your folder, refresh the page and you shall see the added files on the next start.
+
+## Syncing the folder
+
+Needing to refresh the page to have the new files appear seems wasteful. We have a tool that can make the server send messages without needing requests, so we will use that to send modifications to all connected clients when they happen.
+
+For that, we will introduce 2 pieces.
+- `FileSystemWatcher` is a .NET class that has tools to watch a folder for modification, exactly what we need.
+- `ServerHub` is an Elmish.Bridge bag of connections. It keeps a reference for all models and dispatch functions from connected clients.
+
+With both, we can mirror our shared folder at the moment that everything is created.
+
+Let's declare the new messages that we will receive:
+
+```fs
+// Shared/Shared.fs
+
+type ClientMsg =
+    | LoadRoot of FileItem list
+    | FileRenamed of {| OldName: string; NewName: string |}
+    | FileChanged of {| FullPath: string; Size: int |}
+    | FileCreated of {| FullPath: string; Size: int |}
+    | FolderCreated of string
+    | FileDeleted of string
+```
+
+For `FileRenamed` we just need the old and new name. For `FileChanged` and `FileCreated` we use the same definition we have for `FileItem.File` so we can have a better time. For the `FolderCreated` we just take the new path and for `FileDeleted` the former path. Let's send them from the server:
+
+```fs
+// Server/Server.fs
+
+type Msg =
+    | Remote of ServerMsg
+    | ChangedEvent of FileSystemEventArgs
+    | RenamedEvent of RenamedEventArgs
+    | Error of exn
+
+let serverHub = ServerHub()
+
+[<System.Security.Permissions.PermissionSet(System.Security.Permissions.SecurityAction.Demand, Name = "FullTrust")>]
+let watcher root =
+    let watcher = new FileSystemWatcher()
+    watcher.Path <- root
+    watcher.Filter <- "**"
+    watcher.NotifyFilter <-
+        NotifyFilters.Size
+        ||| NotifyFilters.FileName
+        ||| NotifyFilters.DirectoryName
+    watcher.IncludeSubdirectories <- true
+    let changes _ e = serverHub.BroadcastServer(ChangedEvent e)
+    let renamed _ e = serverHub.BroadcastServer(RenamedEvent e)
+    watcher.Changed.AddHandler(FileSystemEventHandler changes)
+    watcher.Created.AddHandler(FileSystemEventHandler changes)
+    watcher.Deleted.AddHandler(FileSystemEventHandler changes)
+    watcher.Renamed.AddHandler(RenamedEventHandler renamed)
+    watcher.EnableRaisingEvents <- true
+
+let update clientDispatch msg model =
+  try
+    match msg with
+    | Error ex ->
+        eprintfn "%A" ex
+        model, Cmd.none
+    | ChangedEvent fc ->
+        let removeBase' = removeBase model.BaseFolder.FullName
+        match fc.ChangeType with
+        | WatcherChangeTypes.Created ->
+            let file = FileInfo(fc.FullPath)
+            if file.Exists then
+              clientDispatch
+                (FileCreated
+                    {| FullPath = fc.FullPath |> removeBase'
+                       Size = int file.Length |})
+            else
+              let d = {|FullPath = fc.FullPath |> removeBase'; Children =  readFolder model.BaseFolder.FullName fc.FullPath|}
+              let rec inner (dir:{| FullPath: string; Children: FileItem list |})  =
+                clientDispatch
+                    (dir.FullPath |> removeBase' |> FolderCreated )
+                dir.Children |> List.iter (function Directory d -> inner d | File f -> clientDispatch (FileCreated f))
+              inner d
+        | WatcherChangeTypes.Deleted ->
+            clientDispatch (fc.FullPath |> removeBase' |> FileDeleted)
+
+        | WatcherChangeTypes.Changed ->
+            let file = FileInfo(fc.FullPath)
+            if file.Exists then
+              clientDispatch
+                (FileChanged
+                    {| FullPath = fc.FullPath |> removeBase'
+                       Size = int file.Length |})
+        | _ ->
+            failwith "Invalid enum for this case"
+        model, Cmd.none
+    | RenamedEvent fr ->
+        let removeBase' = removeBase model.BaseFolder.FullName
+        clientDispatch (FileRenamed {| OldName = fr.OldFullPath |> removeBase'
+                                       NewName = fr.FullPath |> removeBase'  |})
+        model, Cmd.none
+    | Remote() -> failwith "Still not needed"
+  with ex -> model, Cmd.ofMsg (Error ex)
+
+let webApp =
+    let baseFolder = "<Insert the folder that you want to share here>"
+    watcher baseFolder
+    Bridge.mkServer "/socket/init" init update
+    |> Bridge.withServerHub serverHub
+    |> Bridge.runWith Giraffe.server baseFolder
+```
+
+Having a `ServerHub` can work as a subscription. We configure the `FileSystemWatcher` to raise events on every file when they change size, are removed, renamed or created. Then we add events that will send the messages `ChangedEvent` and `RenamedEvent` with the event content for the update function to handle and start the watching by enabling the event raising.
+
+For our `update`, sometimes with fast concurrent modification we can fall on a case that we will read a file that doesn't exist anymore. For peace of mind, we wrap the function on a try..with block so those errors are logged and don't break our connection.
+
+`FileSystemWatcher` is little specific from what the changes are coming from. You get a path without knowing if that path is from a directory or a file. So we first try using the path as a file and it that file doesn't exist, we try again as a folder. In the folder creation case, we send all new files recursively as the event will only be raised for the root folder and not for its children.
+
+Now that the server is sending all those events, we need to reflect the file structure on the client:
+
+```fs
+// Client/Client.fs
+let update (msg: Msg) (currentModel: Model): Model * Cmd<Msg> =
+    match currentModel.Contents, msg with
+    | _, Remote(LoadRoot root) -> { currentModel with Contents = Some root }, Cmd.none
+    | None, _ -> currentModel, Cmd.none
+    | Some content, Remote(FileDeleted file) -> { currentModel with Contents = Some(delete file content) }, Cmd.none
+    | Some content, Remote(FileRenamed file) -> { currentModel with Contents = Some(rename file content) }, Cmd.none
+    | Some content, Remote(FileChanged file) -> { currentModel with Contents = Some(change file content) }, Cmd.none
+    | Some content, Remote(FileCreated file) -> { currentModel with Contents = Some(create file content) }, Cmd.none
+    | Some content, Remote(FolderCreated folder) ->
+        { currentModel with Contents = Some(createFolder folder content) }, Cmd.none
+```
+
+For every message we call a helper function to sync the modification:
+
+- delete:
+
+```fs
+// Client/Client.fs
+let delete target files =
+    let rec inner =
+        function
+        | File f when f.FullPath = target -> None
+        | Directory d when d.FullPath = target -> None
+        | Directory d when target.StartsWith d.FullPath ->
+            Some(Directory {| d with Children = d.Children |> List.choose inner |})
+        | any -> Some any
+    files |> List.choose inner
+```
+
+For `delete` we exploit `List.choose` to remove the file or the folder with the desired name.
+
+- change:
+
+```fs
+// Client/Client.fs
+let change (target: {| FullPath: string; Size: int |}) files =
+    let rec inner =
+        function
+        | File f when f.FullPath = target.FullPath -> File target
+        | Directory d when target.FullPath.StartsWith d.FullPath ->
+            (Directory {| d with Children = d.Children |> List.map inner |})
+        | any -> any
+    files |> List.map inner
+```
+
+For `change` we consider just the files. When you traverse the tree and reach the desired file, update it for the new information.
+
+- rename:
+
+```fs
+// Client/Client.fs
+let rename (target: {| NewName: string; OldName: string |}) files =
+    let rec replacer =
+        function
+        | Directory d ->
+            Directory
+                {| d with
+                       FullPath =
+                               target.NewName + d.FullPath.[target.OldName.Length..]
+                       Children = d.Children |> List.map replacer |}
+        | File f ->
+            File
+                {| f with FullPath = target.NewName + f.FullPath.[target.OldName.Length..] |}
+
+    let rec inner =
+        function
+        | File f when f.FullPath.StartsWith target.OldName ->
+            File {| f with FullPath = target.NewName + f.FullPath.[target.OldName.Length..] |}
+        | Directory d when d.FullPath.StartsWith target.OldName  ->
+            Directory {| d with
+                            FullPath = target.NewName + d.FullPath.[target.OldName.Length..]
+                            Children = d.Children |> List.map replacer |}
+        | Directory d when target.OldName.StartsWith d.FullPath ->
+            (Directory
+                {| d with Children = d.Children |> List.map inner |})
+        | any -> any
+
+    files |> List.map inner
+```
+
+For renaming we have more work. We set the traversal in two phases when the renaming is on a folder, using `inner` for the simple traversal and `replacer` to rewrite the base to the new folder. In the file case, just replace the old path on the begin of the string for the new one.
+
+- create:
+
+```fs
+// Client/Client.fs
+let create (target: {| FullPath: string; Size: int |}) files =
+    let rec inner f =
+        if f
+           |> List.exists (function
+               | Directory d when target.FullPath.StartsWith d.FullPath -> true
+               | _ -> false)
+        then
+            f
+            |> List.map (function
+                | Directory d when target.FullPath.StartsWith d.FullPath ->
+                    Directory {| d with Children = inner d.Children |}
+                | any -> any)
+        else
+            (File target) :: f
+            |> List.sortBy (function
+                | File f -> f.FullPath
+                | Directory d -> d.FullPath)
+    inner files
+```
+
+When creating a file, we go deeper on the subfolders until there is no subfolder that matches the file path. When no subfolder can hold the file, we add it on the latest level and sort it again by name.
+
+- createFolder:
+
+```fs
+// Client/Client.fs
+let createFolder (target: string) files =
+    let rec inner f =
+        if f
+           |> List.exists (function
+               | Directory d when target.StartsWith d.FullPath -> true
+               | _ -> false)
+        then
+            f
+            |> List.map (function
+                | Directory d when target.StartsWith d.FullPath -> Directory {| d with Children = inner d.Children |}
+                | any -> any)
+        else
+            (Directory
+                {| FullPath = target
+                   Children = [] |}) :: f
+            |> List.sortBy (function
+                | File f -> f.FullPath
+                | Directory d -> d.FullPath)
+    inner files
+```
+
+Same logic as `create`, but for folders. If the folder is created with children, like when the folder is copied to the shared one, the `create` will be called for each child file and `createFolder` will be called for each subfolder.
+
+---
+
+Now that we have everything in place to track the files modification, is now time for sending and downloading some files.

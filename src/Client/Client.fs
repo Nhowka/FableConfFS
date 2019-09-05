@@ -63,7 +63,6 @@ let rename (target: {| NewName: string; OldName: string |}) files =
 
     files |> List.map inner
 
-
 let create (target: {| FullPath: string; Size: int |}) files =
     let rec inner f =
         if f
@@ -103,8 +102,6 @@ let createFolder (target: string) files =
                 | Directory d -> d.FullPath)
     inner files
 
-
-
 let update (msg: Msg) (currentModel: Model): Model * Cmd<Msg> =
     match currentModel.Contents, msg with
     | _, Remote(LoadRoot root) -> { currentModel with Contents = Some root }, Cmd.none
@@ -115,6 +112,8 @@ let update (msg: Msg) (currentModel: Model): Model * Cmd<Msg> =
     | Some content, Remote(FileCreated file) -> { currentModel with Contents = Some(create file content) }, Cmd.none
     | Some content, Remote(FolderCreated folder) ->
         { currentModel with Contents = Some(createFolder folder content) }, Cmd.none
+
+
 
 let sizeFormatter =
     let sizes = [ "KB"; "MB"; "GB" ]
