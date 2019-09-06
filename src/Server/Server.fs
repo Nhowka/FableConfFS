@@ -66,10 +66,7 @@ let watcher root =
     watcher.Renamed.AddHandler(RenamedEventHandler renamed)
     watcher.EnableRaisingEvents <- true
 
-let userFolder = System.Environment.GetFolderPath(System.Environment.SpecialFolder.UserProfile)
-let baseFolder = Path.Combine(userFolder, "Shared")
 
-watcher baseFolder
 
 let removeBase (baseFolder: string) (fullName: string) =
     if fullName.StartsWith baseFolder then fullName.[baseFolder.Length..]
@@ -223,7 +220,7 @@ let update clientDispatch msg model =
     with ex -> model, Cmd.ofMsg (Error ex)
 
 
-let uploadHandler (uid: System.Guid, fid: System.Guid): HttpHandler =
+let uploadHandler baseFolder (uid: System.Guid, fid: System.Guid): HttpHandler =
     fun next ctx ->
         task {
             let folder =
@@ -267,10 +264,14 @@ let downloadHandler (uid: System.Guid, fid: System.Guid): HttpHandler =
         }
 
 let webApp: HttpHandler =
-
+    let userFolder = System.Environment.GetFolderPath(System.Environment.SpecialFolder.UserProfile)
+    let baseFolder = Path.Combine(userFolder, "Shared")
+    let folder = DirectoryInfo baseFolder
+    if not folder.Exists then folder.Create()
+    watcher baseFolder
     choose
         [ routef "/api/Download/%O/%O" downloadHandler
-          routef "/api/Upload/%O/%O" uploadHandler
+          routef "/api/Upload/%O/%O" (uploadHandler baseFolder)
           Bridge.mkServer "/socket/init" init update
           |> Bridge.withServerHub serverHub
           |> Bridge.whenDown DeleteTempFiles
