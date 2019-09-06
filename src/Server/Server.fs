@@ -229,13 +229,14 @@ let uploadHandler baseFolder (uid: System.Guid, fid: System.Guid): HttpHandler =
                     else None)
             match folder with
             | Some f ->
-                let di = DirectoryInfo f
+                let folder = Path.Combine(baseFolder, f.TrimStart('\\', '/'))
+                let di = DirectoryInfo folder
 
                 if not di.Exists then di.Create()
                 let formFeature = ctx.Features.Get<IFormFeature>()
                 let! form = formFeature.ReadFormAsync CancellationToken.None
                 for file in form.Files do
-                    let fd = Path.Combine(baseFolder, f.TrimStart('\\', '/'), file.FileName)
+                    let fd = Path.Combine(di.FullName, file.FileName)
                     use fs = File.Create(fd)
                     do! file.CopyToAsync fs
                 return! text "OK" next ctx
