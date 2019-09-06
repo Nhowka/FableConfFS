@@ -29,10 +29,6 @@ let port =
     |> Option.map uint16
     |> Option.defaultValue 8085us
 
-type DownloadInfo =
-    { OriginalFileName: string
-      TempPath: string }
-
 type Msg =
     | Remote of ServerMsg
     | ChangedEvent of FileSystemEventArgs
@@ -40,13 +36,13 @@ type Msg =
     | Error of exn
     | DeleteTempFiles
     | Callback of ClientMsg
-    | FileReady of string * System.Guid * DownloadInfo
+    | FileReady of string * System.Guid * string
 
 type Model =
     { BaseFolder: DirectoryInfo
       UserGuid: System.Guid
       Uploads: Map<System.Guid, string>
-      Downloads: Map<System.Guid, DownloadInfo> }
+      Downloads: Map<System.Guid, string> }
 
 let serverHub = ServerHub()
 
@@ -183,10 +179,7 @@ let update clientDispatch msg model =
                                 use fs = fi.OpenRead()
                                 use ts = File.Create t
                                 do! fs.CopyToAsync ts |> Async.AwaitTask
-                                return FileReady
-                                           (s, g,
-                                            { OriginalFileName = fi.Name
-                                              TempPath = t })
+                                return FileReady (s, g, t)
                             }
                         model, Cmd.OfAsync.result r
                 else model, Cmd.none
@@ -209,7 +202,7 @@ let update clientDispatch msg model =
                 model, Cmd.none
         | DeleteTempFiles ->
             model.Downloads
-            |> Map.iter (fun _ { TempPath = t } ->
+            |> Map.iter (fun _ t ->
                 let fi = FileInfo t
                 if fi.Exists then fi.Delete())
 
@@ -253,10 +246,10 @@ let downloadHandler (uid: System.Guid, fid: System.Guid): HttpHandler =
                     else None)
             match file with
             | Some f ->
-                let fi = FileInfo f.TempPath
+                let fi = FileInfo f
                 if fi.Exists then
                     use fs =
-                        new FileStream(f.TempPath, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite, 4096,
+                        new FileStream(f, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite, 4096,
                                        FileOptions.DeleteOnClose)
                     return! ctx.WriteStreamAsync true fs None None
                 else return None
