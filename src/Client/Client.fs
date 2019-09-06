@@ -402,7 +402,11 @@ open Elmish.HMR
 
 Program.mkProgram init update view
 |> Program.withBridgeConfig (Bridge.endpoint "/socket/init" |> Bridge.withMapping Remote)
+#if DEBUG
 |> Program.withConsoleTrace
+#endif
 |> Program.withReactBatched "elmish-app"
+#if DEBUG
 |> Program.withDebugger
+#endif
 |> Program.run
