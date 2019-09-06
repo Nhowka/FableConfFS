@@ -4,7 +4,12 @@ type FileItem =
     | Directory of {| FullPath: string; Children: FileItem list |}
     | File of {| FullPath: string; Size: int |}
 
-type ServerMsg = unit
+
+type ServerMsg =
+    | RequestDownload of string
+    | RequestUpload of string
+    | UploadSmallFile of string * string
+    | CreateFolder of string
 
 type ClientMsg =
     | LoadRoot of FileItem list
@@ -13,4 +18,7 @@ type ClientMsg =
     | FileCreated of {| FullPath: string; Size: int |}
     | FolderCreated of string
     | FileDeleted of string
-
+    | SetGuid of System.Guid
+    | UploaderReady of string * System.Guid
+    | DownloadSmallFile of string * string
+    | DownloadBigFile of string * System.Guid
