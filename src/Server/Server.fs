@@ -192,8 +192,7 @@ let update clientDispatch msg model =
                 else model, Cmd.none
             | RequestUpload d ->
                 let g = System.Guid.NewGuid()
-                let p = addBase d
-                { model with Uploads = model.Uploads |> Map.add g p }, Cmd.ofMsg (Callback(UploaderReady(d, g)))
+                { model with Uploads = model.Uploads |> Map.add g d }, Cmd.ofMsg (Callback(UploaderReady(d, g)))
 
             | UploadSmallFile(file, content) ->
                 let file = addBase file
