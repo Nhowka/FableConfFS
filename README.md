@@ -18,6 +18,16 @@ For the most part, that is how it's best used. It opens new possibilities for li
 
 But besides that, you can now have an Elmish program that runs on the server with full system access. Exploiting that feature, for today we will make an interface for editing files on a server folder.
 
+## Table of contents
+
+The repository is tagged on some levels:
+
+- [Creating the project](https://github.com/Nhowka/FableConfFS/releases/tag/01-starting-out-safe)
+- [Initial modeling](https://github.com/Nhowka/FableConfFS/releases/tag/02-initial-modelling)
+- [Sync the client and server in real-time](https://github.com/Nhowka/FableConfFS/releases/tag/03-real-time-sync)
+- [Uploading and downloading files](https://github.com/Nhowka/FableConfFS/releases/tag/04-upload-and-download)
+- [Deploying](https://github.com/Nhowka/FableConfFS/releases/tag/05-deploy)
+
 ## Starting out safe
 
 Since version 1.8.0 you can use [SAFE-Template](https://safe-stack.github.io/docs/quickstart/) to create a new project with all you need to start using Elmish.Bridge. This very repository had its first commit with the code you get by typing:
