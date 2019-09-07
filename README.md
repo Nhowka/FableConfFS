@@ -824,7 +824,7 @@ We can now deploy our file sharing application for all to see.
 
 ## Deploying
 
-If you started the project with `--deploy heroku`, created your account and is authenticated, you are just two commands away from having your project online:
+If you started the project with `--deploy heroku`, created your account and is authenticated (read more [here](https://safe-stack.github.io/docs/template-heroku/)), you are just two commands away from having your project online:
 
 ```
 fake build -t Configure <optional name, empty for random>
