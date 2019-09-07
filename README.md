@@ -811,3 +811,16 @@ The form upload is well support by the `IFormFeature` feature. With it you can r
 For last we create the folders, but it's just quality of life and will teach nothing new.
 
 We can now deploy our file sharing application for all to see.
+
+## Deploying
+
+If you started the project with `--deploy heroku`, created your account and is authenticated, you are just two commands away from having your project online:
+
+```
+fake build -t Configure <optional name, empty for random>
+fake build -t Deploy
+```
+
+It's that simple! You may make it better now, creating the functions for renaming, deleting the files, generating logs or having authentication.
+
+I hope that gives you some ideas of dos and don'ts and a better understanding of Elmish.Bridge. Feel free to test it and open lots of issues!
